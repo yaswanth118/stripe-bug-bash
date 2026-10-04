@@ -3,14 +3,17 @@
 #include <numeric>
 
 void Ledger::credit(const std::string& customer_id, const Money& amount) {
+    if (amount.cents <= 0) {
+        throw std::invalid_argument("Negative credit is rejected");
+    }
     balances_[customer_id] += amount.cents;
 }
 
 void Ledger::debit(const std::string& customer_id, const Money& amount) {
-    balances_[customer_id] -= amount.cents;
-    if (balances_[customer_id] < 0) {
+    if (balances_[customer_id] - amount.cents < 0) {
         throw std::runtime_error("Insufficient balance for customer: " + customer_id);
     }
+    balances_[customer_id] -= amount.cents;
 }
 
 std::string Ledger::charge(const std::string& customer_id,
@@ -21,11 +24,16 @@ std::string Ledger::charge(const std::string& customer_id,
     }
 
     Transaction txn(txn_id, customer_id, amount);
+
+    try {
+        debit(customer_id, amount);
+    } catch(std::runtime_error& e) {
+        throw std::runtime_error("Insufficient balance for customer & transaction: " + customer_id + " " + txn_id);
+    }
+
     txn.status = TransactionStatus::COMPLETED;
     transactions_.emplace(txn_id, txn);
     customer_txns_[customer_id].push_back(txn_id);
-
-    debit(customer_id, amount);
     return txn_id;
 }
 
@@ -41,6 +49,7 @@ void Ledger::refund(const std::string& txn_id) {
     }
 
     credit(txn.customer_id, txn.amount);
+    txn.status = TransactionStatus::REFUNDED;
 }
 
 Money Ledger::balance(const std::string& customer_id,
@@ -67,7 +76,7 @@ std::vector<Transaction> Ledger::get_transactions(
 Money Ledger::total_revenue(const std::string& currency) const {
     long long total = 0;
     for (const auto& [id, txn] : transactions_) {
-        if (txn.status != TransactionStatus::FAILED) {
+        if (txn.status == TransactionStatus::COMPLETED) {
             total += txn.amount.cents;
         }
     }
